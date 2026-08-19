@@ -1,11 +1,11 @@
-import pygame, sys, random, math, time
+import pygame, sys, random, math, time, datetime
 
 pygame.init()
 pygame.font.init()
 pygame.mixer.init()
 WIDTH = 640
 HEIGHT = 480
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED, vsync=1) 
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED, vsync=1)
 
 icon = pygame.image.load("assets/icon.png")
 pygame.display.set_caption("Philooxy's Phishing")
@@ -16,15 +16,17 @@ arial = pygame.font.SysFont('arial', 20)
 ut = pygame.font.Font('assets/font.ttf', 20)
 ut_s = pygame.font.Font('assets/font.ttf', 15)
 ut_xs = pygame.font.Font('assets/font.ttf', 12)
-
+pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
 
 # flags
 bobberFallAnim = False #bobber falling animation at start of fishing
 fishingMusic = False #music only starts once on fishing area
 reelAnim = False #reeling in animation
 menuMusic = False #music only starts once on title screen
+
+#not flags
 startTransitionY = 0 #transition between menu and start
-#startTransitionY2 = 100
+startTransitionX = 0 #same thing but horizontal
 
 area = 0
 offsetX, offsetY = 0, 0
@@ -32,10 +34,6 @@ offsetX, offsetY = 0, 0
 bobberSpeed = 2
 bobberFall = 0
 bobberReel = 0
-fish = False
-fishpos = (0,0)
-fishScared = 0
-fishCaught = False
 waterOffset = 0
 cloudOffset = -730
 cloudOffset2 = -680
@@ -46,11 +44,15 @@ isClicking = False
 fishesHeld = 0
 fishCaughtArray = []
 balance = 0
+easing = 0
+bobberPos = (136, 100)
+hovering = False
 
 #upgrade related variables
 reelTime = 60 #how long it takes for you to reel in the fishes
 maxFishes = 3 #how much fishes you can hold at a time
 fishSpawnCap = 5 #how many fishes can spawn
+fishScaredRange = 48 #how close you can get to a fish without it getting scared
 upgrade = False
 
 #settings variables
@@ -62,17 +64,17 @@ class button():
         global startTransitionY
         self.clicked = False
         self.image = pygame.image.load(image)
-        self.rect2 = rect
+        self.rect2 = pygame.Rect(rect)
         self.newarea = newarea
+        self.rect = self.rect2
 
     def update(self, rect):
-        global isClicking, area, startTransitionY
-
-        self.rect2 = rect
+        global isClicking, area, startTransitionY, startTransitionX, hovering
 
         self.image = pygame.transform.scale(self.image, (self.rect2[2], self.rect2[3]))
-        mousepos = pygame.mouse.get_pos()
-        if self.rect2[0] < mousepos[0] < (self.rect2[0] + self.rect2[2]) and self.rect2[1] < mousepos[1] < (self.rect2[1] + self.rect2[3]):
+        if self.rect.collidepoint(pygame.mouse.get_pos()) and (startTransitionY == 100.0 or startTransitionY == 0.0):
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND)
+            hovering = True
             self.rect = pygame.Rect((self.rect2[0]-(self.rect2[2]*0.1), self.rect2[1]-(self.rect2[3]*0.1), self.rect2[2]*1.2, self.rect2[3]*1.2))
             self.image = pygame.transform.scale(self.image, (self.rect2[2]*1.2, self.rect2[3]*1.2))
             if pygame.mouse.get_pressed()[0] == False and isClicking == True:
@@ -82,7 +84,8 @@ class button():
                     area = self.newarea
                 isClicking = True
         else:
-            self.rect = pygame.Rect(self.rect2)
+            self.rect2 = pygame.Rect(rect)
+            self.rect = self.rect2
         screen.blit(self.image, self.rect)
 
 class fishy():
@@ -98,9 +101,10 @@ class fishy():
         self.scared = 0
         self.speed = random.random()+0.5
         self.speed2 = self.speed
+        self.anim = 0
 
-        self.imagepath = f'assets/fish{random.randint(1,1)}.png'
-        self.image = pygame.image.load(self.imagepath) 
+        self.imagepath = f'assets/fish{random.randint(1,1)}_0.png'
+        self.image = pygame.image.load(self.imagepath)
         if self.dir == 2:
             self.image = pygame.transform.flip(self.image, True, False)
 
@@ -112,7 +116,7 @@ class fishy():
         fishes.append(self)
 
     def update(self):
-        global moving, offsetX, offsetY, fishCount, bobberFallAnim, reelAnim, fishes, fishesHeld, maxFishes, fishCaughtArray
+        global moving, offsetX, offsetY, fishCount, bobberFallAnim, reelAnim, fishes, fishesHeld, maxFishes, fishCaughtArray, startTransitionY
 
         self.speed = self.speed2
 
@@ -133,7 +137,7 @@ class fishy():
             self.scared = 30
         if self.scared > 0:
             self.speed = 3*self.speed2
-            
+
             if self.caught == False:
                 if self.pos[0] > offsetX:
                     self.dir = 1
@@ -143,9 +147,9 @@ class fishy():
             self.scared -= 1
 
         if self.dir == 2:
-            self.pos = (self.pos[0]-1*self.speed, self.pos[1])
+            self.pos = (self.pos[0]-1*self.speed, self.pos[1]+startTransitionY*3)
         else:
-            self.pos = (self.pos[0]+1*self.speed, self.pos[1])
+            self.pos = (self.pos[0]+1*self.speed, self.pos[1]+startTransitionY*3)
 
         if self.rect.colliderect(fishingrect) and self.caught == False and fishesHeld < maxFishes:
             fishesHeld += 1
@@ -159,7 +163,7 @@ class fishy():
                 #self.caught = False
                 #fishes.remove(self)
                 reelAnim = True
-        
+
         if self.pos[0] > 320 or self.pos[0] < -320 or (self.pos[1] > 200 and self.caught == False):
             fishes.remove(self)
 
@@ -171,12 +175,15 @@ class fishy():
 
 #basic upgrade item
 class shopItem():
-    def __init__(self, name, desc, image, rect, cost, increment, cap):
+    def __init__(self, name, desc, image, rect, cost, costIncrement, increment, cap):
         #global isClicking
         self.image = pygame.image.load(image)
         self.imagepath = image
         self.rect2 = pygame.Rect(rect)
+        self.rect = self.rect2
         self.cost = cost
+        self.cost2 = cost
+        self.costIncrement = costIncrement
         self.increment = increment
         self.name = name
         self.desc = desc
@@ -185,21 +192,24 @@ class shopItem():
         self.upgrade = False
         self.capCheck = True
         self.capCheck2 = True
+        self.bought = 0
 
     def update(self, var):
-        global balance
-        
+        global balance, hovering
+
         self.image = pygame.transform.scale(self.image, (self.rect2[2], self.rect2[3]))
-        mousepos = pygame.mouse.get_pos()
-        if self.rect2[0] < mousepos[0] < (self.rect2[0] + self.rect2[2]) and self.rect2[1] < mousepos[1] < (self.rect2[1] + self.rect2[3]):
+        if self.rect.collidepoint(pygame.mouse.get_pos()) and pygame.mouse.get_focused():
+            hovering = True
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND)
             self.rect = self.rect2.inflate(self.rect2[2]*0.2, self.rect2[3]*0.2)
             self.image = pygame.transform.scale(self.image, (self.rect2[2]*1.2, self.rect2[3]*1.2))
-            
+
             self.upgrade = False
             if pygame.mouse.get_pressed()[0] == False and self.isClicking == True:
                 self.isClicking = False
             if pygame.mouse.get_pressed()[0]:
                 if self.isClicking == False:
+                    self.bought += 1
                     if self.increment > 0:
                         self.capCheck = (var+self.increment < self.cap)
                     elif self.increment < 0:
@@ -227,8 +237,11 @@ class shopItem():
                 desc2Text = f'{var} -> {var2}'
             else:
                 desc2Text = f'MAX ({self.cap})'
+                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_NO)
 
-            cost = ut_xs.render(f'Cost: $0', False, (0,0,0))
+            self.cost = self.cost2 + self.costIncrement*self.bought#(int(var/abs(self.increment)))
+
+            cost = ut_xs.render(f'Cost: ${self.cost}', False, (0,0,0))
             costRect = cost.get_rect()
             costRect.center = (self.rect2.center[0], self.rect2.center[1] + self.rect2[3]/2 + desc1Rect[3]/2 + 20 + 16)
             screen.blit(cost, costRect)
@@ -252,54 +265,69 @@ class shopItem():
 #upgrade types
 
 class hookUpgrade(shopItem):
-    def __init__(self, name, desc, image, rect, cost, increment, cap):
-        self.shopItem = shopItem(name, desc, image, rect, cost, increment, cap)
+    def __init__(self, name, desc, image, rect, cost, costIncrement, increment, cap):
+        self.shopItem = shopItem(name, desc, image, rect, cost, costIncrement, increment, cap)
         self.cap = cap
 
     def update(self):
         global maxFishes
         self.increment = self.shopItem.increment
-        upgrade1 = self.shopItem.update(maxFishes)
-        if upgrade1 == True:
+        upgrade = self.shopItem.update(maxFishes)
+        if upgrade == True:
             maxFishes += self.increment
         if maxFishes > self.cap:
             maxFishes = self.cap
 
 
 class spawnCapUpgrade(shopItem):
-    def __init__(self, name, desc, image, rect, cost, increment, cap):
+    def __init__(self, name, desc, image, rect, cost, costIncrement, increment, cap):
         #shopItem.__init__(self, name, desc, image, rect, cost, increment, cap)
-        self.shopItem = shopItem(name, desc, image, rect, cost, increment, cap)
+        self.shopItem = shopItem(name, desc, image, rect, cost, costIncrement, increment, cap)
         self.cap = cap
 
     def update(self):
         global fishSpawnCap
         self.increment = self.shopItem.increment
-        upgrade2 = self.shopItem.update(fishSpawnCap)
-        if upgrade2 == True:
+        upgrade = self.shopItem.update(fishSpawnCap)
+        if upgrade == True:
             fishSpawnCap += self.increment
         if fishSpawnCap > self.cap:
             fishSpawnCap = self.cap
 
 
 class reelTimeUpgrade(shopItem):
-    def __init__(self, name, desc, image, rect, cost, increment, cap):
-        self.shopItem = shopItem(name, desc, image, rect, cost, increment, cap)
+    def __init__(self, name, desc, image, rect, cost, costIncrement, increment, cap):
+        self.shopItem = shopItem(name, desc, image, rect, cost, costIncrement, increment, cap)
         self.cap = cap
 
     def update(self):
         global reelTime
         self.increment = self.shopItem.increment
-        upgrade3 = self.shopItem.update(reelTime)
-        if upgrade3 == True:
+        upgrade = self.shopItem.update(reelTime)
+        if upgrade == True:
             reelTime += self.increment
         if reelTime < self.cap:
             reelTime = self.cap
 
+class scaredRangeUpgrade(shopItem):
+    def __init__(self, name, desc, image, rect, cost, costIncrement, increment, cap):
+        self.shopItem = shopItem(name, desc, image, rect, cost, costIncrement, increment, cap)
+        self.cap = cap
+
+    def update(self):
+        global fishScaredRange
+        self.increment = self.shopItem.increment
+        upgrade = self.shopItem.update(fishScaredRange)
+        if upgrade == True:
+            fishScaredRange += self.increment
+        if fishScaredRange < self.cap:
+            fishScaredRange = self.cap
+
 #upgrades
-hookupgrade = hookUpgrade("Hook upgrade", "Increase how much fish you can hold", "assets/hookupgrade.png", (WIDTH/4 - 16, 2*HEIGHT/3, 32, 32), 10, 5, 50)
-spawncapupgrade = spawnCapUpgrade("Max fish upgrade", "Increase how much fish spawn at a time", "assets/maxfishupgrade.png", (2*WIDTH/4 - 16, 2*HEIGHT/3, 32, 32), 50, 1, 20)
-reeltimeupgrade = reelTimeUpgrade("Reel time upgrade", "Decrease the time to reel in fish", "assets/reelupgrade.png", (3*WIDTH/4 - 16, 2*HEIGHT/3, 32, 32), 20, -10, 10)
+hookupgrade = hookUpgrade("Hook upgrade", "Increase how much fish you can hold", "assets/hookupgrade.png", (WIDTH/4 - 16, HEIGHT/4, 32, 32), 50, 25, 5, 50)
+spawncapupgrade = spawnCapUpgrade("Max fish upgrade", "Increase how much fish spawn at a time", "assets/maxfishupgrade.png", (2*WIDTH/4 - 16, HEIGHT/4, 32, 32), 30, 20, 1, 20)
+reeltimeupgrade = reelTimeUpgrade("Reel time upgrade", "Decrease the time to reel in fish", "assets/reelupgrade.png", (3*WIDTH/4 - 16, HEIGHT/4, 32, 32), 25, 15, -10, 10)
+scaredrangeupgrade = scaredRangeUpgrade("Better Lure", "Decrease the area where fish get scared", "assets/reelupgrade.png", (WIDTH/4 - 16, 2*HEIGHT/4, 32, 32), 55, 5, -8, 16)
 
 #buttons
 startbutton = button((WIDTH/2 - 50, HEIGHT/2 + 40 - 600 + startTransitionY*6, 100, 40), 1, "assets/fishbutton.png")
@@ -307,113 +335,167 @@ shopbutton = button((WIDTH/2 - 50, HEIGHT/2 + 90 - 600 + startTransitionY*6, 100
 #settingsbutton = button((WIDTH/2 - 50, HEIGHT/2 + 140 - 600 + startTransitionY * 6, 100, 40), 3, "assets/settingsbutton.png")
 exitbutton = button((WIDTH/2 - 50, HEIGHT/2 + 190 - 600 + startTransitionY*6, 100, 40), -1, "assets/exitbutton.png")
 homebutton_area1 = button((20, 20, 100, 40), 0, "assets/homebutton.png")
-homebutton_area2 = button((20, 20, 100, 40), 0, "assets/homebutton.png")
 
 #images
-cloudsImage2 = pygame.image.load("assets/clouds2-outline.png")
-cloudsImage = pygame.image.load("assets/clouds1-outline.png")
-waterImage = pygame.image.load("assets/water.png")
-waterImage2 = pygame.image.load("assets/water.png")
-dockImage = pygame.image.load("assets/dock.png")
-fisherImage_normal = pygame.image.load("assets/fisher.png")
-fisherImage_pull = pygame.image.load("assets/fisherpull.png")
-dockImage2 = pygame.image.load("assets/dock.png")
-dockImage2 = pygame.transform.flip(dockImage2, True, False)
-bobberImage = pygame.image.load("assets/bobber.png")
+now = datetime.datetime.now()
+hour = int(now.strftime("%H"))
+sunsetCheck = 7 <= hour <= 9 or 19 <= hour <= 21
+if sunsetCheck:
+    cloudsImage2 = pygame.image.load("assets/clouds2-sunset.png")
+    cloudsImage = pygame.image.load("assets/clouds1-sunset.png")
+    fisherImage_normal = pygame.image.load("assets/fisher-sunset.png")
+    fisherImage_pull = pygame.image.load("assets/fisherpull.png")
+    dockImage = pygame.image.load("assets/dock-sunset.png")
+    dockImage2 = pygame.transform.flip(dockImage, True, False)
+    skyColor = (4, 99, 171)
+    waterImage = pygame.image.load("assets/water-sunset.png")
+    sunImage = pygame.image.load("assets/sun-sunset.png")
+    bobberImage = pygame.image.load("assets/bobber-sunset.png")
+    titleImage = pygame.image.load("assets/title-sunset.png")
+else:
+    cloudsImage2 = pygame.image.load("assets/clouds2-noon.png")
+    cloudsImage = pygame.image.load("assets/clouds1-noon.png")
+    fisherImage_normal = pygame.image.load("assets/fisher-noon.png")
+    fisherImage_pull = pygame.image.load("assets/fisherpull.png")
+    dockImage = pygame.image.load("assets/dock-noon.png")
+    dockImage2 = pygame.transform.flip(dockImage, True, False)
+    skyColor = (0, 175, 229)
+    waterImage = pygame.image.load("assets/water-noon.png")
+    sunImage = pygame.image.load("assets/sun-noon.png")
+    bobberImage = pygame.image.load("assets/bobber-noon.png")
+    titleImage = pygame.image.load("assets/title-noon.png")
+
+waterImage2 = waterImage
 fisherImage = fisherImage_normal
-titleImage = pygame.image.load("assets/title.png")
 
 #sounds
 ykwtm = pygame.mixer.Sound("assets/fish.mp3")
 
 #music
-mus_menu = pygame.mixer.Sound("assets/hotel2.mp3")
-mus_fishing = pygame.mixer.Sound("assets/paradise.mp3")
+if sunsetCheck:
+    mus_menu = pygame.mixer.Sound("assets/hotel2.mp3")
+    mus_fishing = pygame.mixer.Sound("assets/hotel2.mp3")
+else:
+    mus_menu = pygame.mixer.Sound("assets/hotel2.mp3")
+    mus_fishing = pygame.mixer.Sound("assets/paradise.mp3")
 
-def displayscreen(area):
-    global bobberFallAnim, fishingMusic, reelAnim, menuMusic, startTransitionY, offsetX, offsetY, bobberSpeed, bobberFall, bobberReel, exponent, fish, fishpos, fishFlip, fishScared, fishCaught, waterOffset, fishCount, fishingrect, fishingrect2, moving, fishes, cloudOffset, cloudOffset2, xmove_temp, ymove_temp, reelTime, linePos, fishesHeld, fishSpawnCap, fishCaughtArray, fishesHeld, balance, fisherImage, fishSFX, bobberPos
+if sunsetCheck:
+    mus_menu.play(loops=-1)
+
+#functions
+
+def ease(t):
+    return 1 - ((1 - t) ** 3)
+
+def drawbg():
+    global cloudOffset, cloudOffset2, waterOffset, startTransitionY, skyColor, fishes, bobberPos, sunsetCheck
+    screen.fill(skyColor)
+
+    screen.blit(sunImage, (320,startTransitionY-20))
+
+    screen.blit(cloudsImage2, (cloudOffset2,15+startTransitionY/4))
+
+    cloudOffset2 += 0.25
+    if cloudOffset2 > 0:
+        cloudOffset2 = -680
+
+    screen.blit(cloudsImage, (cloudOffset, -40+2*startTransitionY/5))
+
+    cloudOffset += 0.5
+    if cloudOffset > 0:
+        cloudOffset = -730
+
+    screen.blit(waterImage, (-100-70*math.sin(waterOffset),startTransitionY))
+
+    screen.blit(waterImage2, (-100+100*math.sin(waterOffset),startTransitionY*3))
+
+    if sunsetCheck:
+        waterOffset += 0.005
+    else:
+        waterOffset += 0.01
+
+    homebutton_area1.update((20, 20+startTransitionY*6, 100, 40))
+
+    for i in fishes:
+        i.update()
+
+    screen.blit(dockImage, (-2, startTransitionY*6-100))
+
+    fisherImage = fisherImage_normal
+    if reelAnim == True:
+        fisherImage = fisherImage_pull
+
+    screen.blit(fisherImage, (0, startTransitionY*6-100))
+
+    screen.blit(dockImage2, (WIDTH - 158, startTransitionY*6-100))
+
+def bobberMove():
+    global moving, offsetX, offsetY, bobberSpeed
 
     pressed_keys = pygame.key.get_pressed()
 
+    if pressed_keys[pygame.K_LEFT] and offsetX > -200:
+        moving = True
+        offsetX -= 1*bobberSpeed
+    if pressed_keys[pygame.K_RIGHT] and offsetX < 200:
+        moving = True
+        offsetX += 1*bobberSpeed
+    if pressed_keys[pygame.K_UP] and offsetY > 0:
+        moving = True
+        offsetY -= 1*bobberSpeed
+    if pressed_keys[pygame.K_DOWN] and offsetY < 200:
+        moving = True
+        offsetY += 1*bobberSpeed
+
+    if pressed_keys[pygame.K_LEFT] and pressed_keys[pygame.K_RIGHT]:
+        moving = False
+    if pressed_keys[pygame.K_UP] and pressed_keys[pygame.K_DOWN]:
+        moving = False
+
+def displayscreen(area):
+    global bobberFallAnim, fishingMusic, reelAnim, menuMusic, startTransitionY, offsetX, offsetY, bobberSpeed, bobberFall, bobberReel, exponent, waterOffset, fishCount, fishingrect, fishingrect2, moving, fishes, cloudOffset, cloudOffset2, xmove_temp, ymove_temp, reelTime, linePos, fishesHeld, fishSpawnCap, fishCaughtArray, fishesHeld, balance, fisherImage, fishSFX, bobberPos, easing, run, sunsetCheck
+
     if area == -1:
-        sys.exit()
+        run = False
 
     elif area == 0:
 
-        bobberFallAnim = True
-        reelAnim = False
-        bobberFall = 0
-        bobberReel = 0
-        fish = False
-        offsetX = 0
-        offsetY = 0
-        fishesHeld = 0
-#        startTransitionY = 100
-
-        for i in fishes:
-            fishes.remove(i)
-
-        fishingMusic = False
-
         if menuMusic == False:
-            pygame.mixer.stop()
-            mus_menu.play(loops=-1)
             menuMusic = True
+            if not(sunsetCheck):
+                pygame.mixer.stop()
+                mus_menu.play(loops=-1)
+            bobberFallAnim = True
+            reelAnim = False
+            bobberFall = 0
+            bobberReel = 0
+            offsetX = 0
+            offsetY = 0
+            fishesHeld = 0
+            fishingMusic = False
+            if sunsetCheck == True:
+                fishingMusic = True
 
-        """
-        screen.fill((0,175,229))
+            for i in fishes:
+                fishes.remove(i)
 
-        screen.blit(cloudsImage2, (cloudOffset2,40))
+        drawbg()
 
-        cloudOffset2 += 0.25
-        if cloudOffset2 > 0:
-            cloudOffset2 = -680
+        homebutton_area1.update((20, 20+startTransitionY*6, 100, 40))
 
-        screen.blit(cloudsImage, (cloudOffset,0))
-
-        cloudOffset += 0.5
-        if cloudOffset > 0:
-            cloudOffset = -730
-
-        screen.blit(waterImage, (-100-70*math.sin(waterOffset),50))
-
-        screen.blit(waterImage2, (-100+100*math.sin(waterOffset),100))
-
-        waterOffset += 0.01
-        """
-
-        screen.fill((0,175,229))
-
-        screen.blit(cloudsImage2, (cloudOffset2,25+3*startTransitionY/20))
-
-        cloudOffset2 += 0.25
-        if cloudOffset2 > 0:
-            cloudOffset2 = -680
-
-        screen.blit(cloudsImage, (cloudOffset, -20+startTransitionY/5))
-
-        cloudOffset += 0.5
-        if cloudOffset > 0:
-            cloudOffset = -730
-
-        screen.blit(waterImage, (-100-70*math.sin(waterOffset),startTransitionY/2))
-
-        screen.blit(waterImage2, (-100+100*math.sin(waterOffset),startTransitionY))
-
-        waterOffset += 0.01
-
-        screen.blit(dockImage, (0, startTransitionY*6-100))
-
-        #screen.blit(fisherImage, (0, startTransitionY*6-100))
-
-        screen.blit(dockImage2, (WIDTH - 158, startTransitionY*6-100))
-
-        #screen.blit(bobberImage, (136, 100+startTransitionY*6))
+        screen.blit(bobberImage, (136, 100+startTransitionY*6))
 
         screen.blit(titleImage, (100, 50-700+startTransitionY*7))
 
         if startTransitionY < 100:
-            startTransitionY += 1
+            startTransitionY = pygame.math.lerp(0, 100, ease(easing))
+
+            easing += 0.01
+
+
+        elif startTransitionY == 100.0:
+
+            easing = 0
 
         startbutton.update((WIDTH/2 - 50, HEIGHT/2 + 40 - 600 + startTransitionY*6, 100, 40))
         shopbutton.update((WIDTH/2 - 50, HEIGHT/2 + 90 - 600 + startTransitionY*6, 100, 40))
@@ -425,15 +507,18 @@ def displayscreen(area):
         menuMusic = False
 
         if fishingMusic == False:
-            pygame.mixer.stop()
-            mus_fishing.play(loops=-1)
             fishingMusic = True
+            if not(sunsetCheck):
+                pygame.mixer.stop()
+                mus_fishing.play(loops=-1)
+                menuMusic = False
+            if sunsetCheck == True:
+                menuMusic = True
 
-        if reelAnim == True and startTransitionY == -1:
+        if reelAnim == True and startTransitionY == 0.0:
             tempReelTime = reelTime*(fishesHeld+0)/2
             linePos = (140, 91)
             if bobberReel == 0:
-                #offsetX, offsetY = -40, 0
                 xmove_temp = ((WIDTH/2+offsetX)-142)/tempReelTime
                 ymove_temp = ((HEIGHT/2+offsetY)-102)/tempReelTime
                 bobberReel = 1
@@ -457,7 +542,7 @@ def displayscreen(area):
                 bobberFallAnim = True
 
         moving = False
-        if bobberFallAnim == True and startTransitionY == -1:
+        if bobberFallAnim == True and startTransitionY == 0.0:
             moving = True
             if bobberFall < 1:
                 offsetX = -169
@@ -473,55 +558,15 @@ def displayscreen(area):
                 bobberFallAnim = False
 
 
-        if bobberFallAnim == False and reelAnim == False and startTransitionY == -1:
-            if pressed_keys[pygame.K_LEFT] and offsetX > -200:
-                moving = True
-                offsetX -= 1*bobberSpeed
-            if pressed_keys[pygame.K_RIGHT] and offsetX < 200:
-                moving = True
-                offsetX += 1*bobberSpeed
-            if pressed_keys[pygame.K_UP] and offsetY > 0:
-                moving = True
-                offsetY -= 1*bobberSpeed
-            if pressed_keys[pygame.K_DOWN] and offsetY < 200:
-                moving = True
-                offsetY += 1*bobberSpeed
+        if bobberFallAnim == False and reelAnim == False and startTransitionY == 0.0:
+            bobberMove()
 
-            if pressed_keys[pygame.K_LEFT] and pressed_keys[pygame.K_RIGHT]:
-                moving = False
-            if pressed_keys[pygame.K_UP] and pressed_keys[pygame.K_DOWN]:
-                moving = False
-        
         fishingrect = pygame.Rect(WIDTH/2 - 16 + offsetX, HEIGHT/2 - 16 + 16 + offsetY, 32, 32)
         fishingrect2 = pygame.Rect(WIDTH/2 - 48 + offsetX, HEIGHT/2 - 48 + 16 + offsetY, 96, 96)
 
-        if startTransitionY > -1:
+        drawbg()
 
-            screen.fill((0,175,229))
-
-            screen.blit(cloudsImage2, (cloudOffset2,25+3*startTransitionY/20))
-
-            cloudOffset2 += 0.25
-            if cloudOffset2 > 0:
-                cloudOffset2 = -680
-
-            screen.blit(cloudsImage, (cloudOffset, -20+startTransitionY/5))
-
-            cloudOffset += 0.5
-            if cloudOffset > 0:
-                cloudOffset = -730
-
-            screen.blit(waterImage, (-100-70*math.sin(waterOffset),startTransitionY/2))
-
-            screen.blit(waterImage2, (-100+100*math.sin(waterOffset),startTransitionY))
-
-            waterOffset += 0.01
-
-            screen.blit(dockImage, (0, startTransitionY*6-100))
-
-            screen.blit(fisherImage, (0, startTransitionY*6-100))
-
-            screen.blit(dockImage2, (WIDTH - 158, startTransitionY*6-100))
+        if startTransitionY > 0:
 
             screen.blit(bobberImage, (136, 100+startTransitionY*6))
 
@@ -532,35 +577,13 @@ def displayscreen(area):
 
             screen.blit(titleImage, (100, 50-700+startTransitionY*7))
 
-            startTransitionY -= 1
+            startTransitionY = pygame.math.lerp(100, 0, ease(easing))
 
-        elif startTransitionY == -1:
+            easing += 0.01
 
-            screen.fill((0,175,229))
+        elif startTransitionY == 0.0:
 
-            #cloud offsets
-            #clouds1: 730
-            #clouds2: 680
-
-            screen.blit(cloudsImage2, (cloudOffset2,25))
-
-            cloudOffset2 += 0.25
-            if cloudOffset2 > 0:
-                cloudOffset2 = -680
-
-            screen.blit(cloudsImage, (cloudOffset,-20))
-
-            cloudOffset += 0.5
-            if cloudOffset > 0:
-                cloudOffset = -730
-
-            homebutton_area1.update((20, 20, 100, 40))
-
-            screen.blit(waterImage, (-100-70*math.sin(waterOffset),0))
-
-            screen.blit(waterImage2, (-100+100*math.sin(waterOffset),0))
-
-            waterOffset += 0.01
+            easing = 0
 
             if len(fishes) < fishSpawnCap + fishesHeld:
                 r = random.randint(1, 100)
@@ -569,18 +592,6 @@ def displayscreen(area):
                         ykwtm.play()
                     fish = fishy()
 
-            for i in fishes:
-                i.update()
-
-            screen.blit(dockImage, (0, -100))
-
-            fisherImage = fisherImage_normal
-            if reelAnim == True:
-                fisherImage = fisherImage_pull
-
-            screen.blit(fisherImage, (0, -100))
-
-            screen.blit(dockImage2, (WIDTH - 158, -100))
 
             pygame.draw.line(screen, (0,0,0), linePos, (WIDTH/2 + offsetX-1, HEIGHT/2 + offsetY - 11), width=2)
 
@@ -589,26 +600,27 @@ def displayscreen(area):
 
             screen.blit(bobberImage, (fishingrect[0], fishingrect[1]-11))
 
-            #bobberPos = (offsetX+16, offsetY-11)
+            fishCounter = ut.render(f'Fish Caught: {fishCount}', False, (0,0,0))
+            fishCounterRect = fishCounter.get_rect()
+            fishCounterRect.topright = (WIDTH - 20, 20)
+            screen.blit(fishCounter, fishCounterRect)
 
-        fishCounter = ut.render(f'Fish Caught: {fishCount}', False, (0,0,0))
-        fishCounterRect = fishCounter.get_rect()
-        fishCounterRect.topright = (WIDTH - 20, 20)
-        screen.blit(fishCounter, fishCounterRect)
-
-        fishesHelder = ut.render(f'Fish Held: {fishesHeld}/{maxFishes}', False, (0,0,0))
-        fishesHelderRect = fishesHelder.get_rect()
-        fishesHelderRect.bottomright = (WIDTH - 20, HEIGHT - 20)
-        screen.blit(fishesHelder, fishesHelderRect)
+            fishesHelder = ut.render(f'Fish Held: {fishesHeld}/{maxFishes}', False, (0,0,0))
+            fishesHelderRect = fishesHelder.get_rect()
+            fishesHelderRect.bottomright = (WIDTH - 20, HEIGHT - 20)
+            screen.blit(fishesHelder, fishesHelderRect)
 
     elif area == 2:
+
+        drawbg()
 
         hookupgrade.update()
         spawncapupgrade.update()
         reeltimeupgrade.update()
+        scaredrangeupgrade.update()
 
         homebutton_area1.update((20, 20, 100, 40))
-        
+
 
 def update():
     pressed_keys = pygame.key.get_pressed()
@@ -627,8 +639,13 @@ while run:
         if event.type == pygame.QUIT:
             sys.exit()
 
-    screen.fill((255,255,255)) 
+    screen.fill((255,255,255))
+
+    hovering = False
 
     displayscreen(area)
+
+    if hovering == False:
+        pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
 
     update()
