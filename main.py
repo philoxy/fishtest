@@ -76,7 +76,7 @@ upgrade = False
 #settings variables
 volume = 1 #volume
 fishSFX = False#if you want the annoying fish sound that plays every time a fish spawns
-lowGraphicsMode = True
+lowGraphicsMode = False
 
 #stupid
 wideMode = False
